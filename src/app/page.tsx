@@ -14,10 +14,21 @@ import {
   RefreshCcw,
   Send,
   Sparkles,
+  Trash2,
   User,
 } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -36,6 +47,7 @@ import {
   SidebarInset,
   SidebarFooter,
   SidebarMenuSubItem,
+  SidebarMenuAction,
 } from '@/components/ui/sidebar';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
@@ -49,11 +61,14 @@ import { UploadDialog } from '@/components/scholar-chat/upload-dialog';
 
 type SourceUpload = { type: 'file', content: File } | { type: 'youtube', content: string } | { type: 'website', content: string };
 
+type DeletionTarget = { type: 'project', id: string } | { type: 'source', id: string } | null;
+
 export default function ScholarChat() {
   const [projects, setProjects] = React.useState<Project[]>(MOCK_PROJECTS);
-  const [activeProject, setActiveProject] = React.useState<Project>(projects[0]);
+  const [activeProject, setActiveProject] = React.useState<Project | null>(projects.length > 0 ? projects[0] : null);
   const [activeSource, setActiveSource] = React.useState<Source | null>(null);
   const [isUploading, setIsUploading] = React.useState(false);
+  const [deletionTarget, setDeletionTarget] = React.useState<DeletionTarget>(null);
 
   const { toast } = useToast();
 
@@ -74,6 +89,10 @@ export default function ScholarChat() {
   };
 
   const handleUpload = async (source: SourceUpload) => {
+    if (!activeProject) {
+        toast({ variant: 'destructive', title: 'Error', description: 'No active project to add a source to.' });
+        return;
+    }
     setIsUploading(true);
 
     let fileName = '';
@@ -81,7 +100,6 @@ export default function ScholarChat() {
 
     if (source.type === 'file') {
       fileName = source.content.name;
-      // Simulate file processing and summary generation
       await new Promise(resolve => setTimeout(resolve, 2000));
       fileContent = `This is the simulated content for ${source.content.name}. It contains key details about AI research and development.`;
     } else if (source.type === 'youtube') {
@@ -100,10 +118,7 @@ export default function ScholarChat() {
       page: 1,
     };
 
-    setActiveProject(prev => ({
-      ...prev,
-      sources: [newSource, ...prev.sources],
-    }));
+    setActiveProject(prev => (prev ? { ...prev, sources: [newSource, ...prev.sources] } : null));
     
     const updatedSource = { ...newSource, status: 'indexed' as const, content: fileContent };
 
@@ -113,11 +128,14 @@ export default function ScholarChat() {
         documentText: updatedSource.content,
       });
 
-      setActiveProject(prev => {
-        const updatedSources = prev.sources.map(s => (s.id === newSource.id ? updatedSource : s));
+      setProjects(prevProjects => prevProjects.map(p => {
+        if (p.id !== activeProject.id) return p;
+        const updatedSources = p.sources.map(s => (s.id === newSource.id ? updatedSource : s));
         const newSummary = `Summary for ${updatedSource.name}: ${summaryResult.summary}`;
-        return { ...prev, sources: updatedSources, summary: newSummary };
-      });
+        const updatedProject = { ...p, sources: updatedSources, summary: newSummary };
+        setActiveProject(updatedProject);
+        return updatedProject;
+      }));
 
       toast({
         title: 'Upload Successful',
@@ -130,15 +148,46 @@ export default function ScholarChat() {
         title: 'Error',
         description: 'Failed to generate summary for the document.',
       });
-      // Still update source status
-       setActiveProject(prev => {
-        const updatedSources = prev.sources.map(s => (s.id === newSource.id ? {...updatedSource, status: 'error' as const } : s));
-        return { ...prev, sources: updatedSources };
-      });
+       setProjects(prevProjects => prevProjects.map(p => {
+        if (p.id !== activeProject.id) return p;
+        const updatedSources = p.sources.map(s => (s.id === newSource.id ? {...updatedSource, status: 'error' as const } : s));
+        const updatedProject = { ...p, sources: updatedSources };
+        setActiveProject(updatedProject);
+        return updatedProject;
+      }));
     } finally {
       setIsUploading(false);
     }
   };
+
+  const handleDelete = () => {
+    if (!deletionTarget) return;
+
+    if (deletionTarget.type === 'project') {
+      const newProjects = projects.filter(p => p.id !== deletionTarget.id);
+      setProjects(newProjects);
+
+      if (activeProject?.id === deletionTarget.id) {
+        setActiveProject(newProjects.length > 0 ? newProjects[0] : null);
+      }
+      toast({ title: 'Project Deleted' });
+    } else if (deletionTarget.type === 'source') {
+      if (!activeProject) return;
+
+      const newSources = activeProject.sources.filter(s => s.id !== deletionTarget.id);
+      const updatedProject = { ...activeProject, sources: newSources };
+      
+      setProjects(projects.map(p => p.id === activeProject.id ? updatedProject : p));
+      setActiveProject(updatedProject);
+      if (activeSource?.id === deletionTarget.id) {
+        setActiveSource(null);
+      }
+      toast({ title: 'Source Deleted' });
+    }
+
+    setDeletionTarget(null);
+  };
+
 
   return (
     <TooltipProvider>
@@ -163,37 +212,45 @@ export default function ScholarChat() {
                         <SidebarMenuSubItem key={project.id}>
                           <SidebarMenuSubButton
                             onClick={() => setActiveProject(project)}
-                            isActive={activeProject.id === project.id}
+                            isActive={activeProject?.id === project.id}
                           >
                             <Notebook className="size-4" />
                             <span className="truncate font-headline">{project.name}</span>
                           </SidebarMenuSubButton>
+                           <SidebarMenuAction showOnHover onClick={(e) => { e.stopPropagation(); setDeletionTarget({ type: 'project', id: project.id })}}>
+                            <Trash2 className="size-4" />
+                          </SidebarMenuAction>
                         </SidebarMenuSubItem>
                       ))}
                     </SidebarMenuSub>
                   </SidebarMenuItem>
                 </SidebarMenu>
 
-                <div className="flex-grow p-2">
-                  <h3 className="px-2 py-1 text-xs font-semibold text-muted-foreground font-headline">Sources</h3>
-                  <ScrollArea className="h-[calc(100vh-250px)]">
-                    <SidebarMenu>
-                      {activeProject.sources.map(source => (
-                        <SidebarMenuItem key={source.id}>
-                          <SidebarMenuButton
-                            onClick={() => setActiveSource(source)}
-                            tooltip={source.name}
-                            className="justify-start gap-2"
-                          >
-                            <FileText className="size-4" />
-                            <span className="truncate font-body">{source.name}</span>
-                            {source.status === 'processing' && <Loader2 className="size-4 animate-spin ml-auto" />}
-                          </SidebarMenuButton>
-                        </SidebarMenuItem>
-                      ))}
-                    </SidebarMenu>
-                  </ScrollArea>
-                </div>
+                {activeProject && (
+                  <div className="flex-grow p-2">
+                    <h3 className="px-2 py-1 text-xs font-semibold text-muted-foreground font-headline">Sources</h3>
+                    <ScrollArea className="h-[calc(100vh-250px)]">
+                      <SidebarMenu>
+                        {activeProject.sources.map(source => (
+                          <SidebarMenuItem key={source.id}>
+                            <SidebarMenuButton
+                              onClick={() => setActiveSource(source)}
+                              tooltip={source.name}
+                              className="justify-start gap-2"
+                            >
+                              <FileText className="size-4" />
+                              <span className="truncate font-body">{source.name}</span>
+                              {source.status === 'processing' && <Loader2 className="size-4 animate-spin ml-auto" />}
+                            </SidebarMenuButton>
+                            <SidebarMenuAction showOnHover onClick={(e) => { e.stopPropagation(); setDeletionTarget({ type: 'source', id: source.id })}}>
+                              <Trash2 className="size-4" />
+                            </SidebarMenuAction>
+                          </SidebarMenuItem>
+                        ))}
+                      </SidebarMenu>
+                    </ScrollArea>
+                  </div>
+                )}
               </div>
             </SidebarContent>
             <SidebarFooter className="p-2">
@@ -204,18 +261,26 @@ export default function ScholarChat() {
           <SidebarInset className="flex-1 flex flex-col">
             <main className="flex-1 p-4 md:p-6 flex justify-center">
               <div className="w-full max-w-4xl">
-                <Tabs defaultValue="chat" className="w-full">
-                  <TabsList className="grid w-full grid-cols-2">
-                    <TabsTrigger value="chat" className="font-headline">Chat</TabsTrigger>
-                    <TabsTrigger value="summary" className="font-headline">Summary</TabsTrigger>
-                  </TabsList>
-                  <TabsContent value="chat">
-                    <ChatView project={activeProject} onCitationClick={setActiveSource} />
-                  </TabsContent>
-                  <TabsContent value="summary">
-                    <SummaryView project={activeProject} />
-                  </TabsContent>
-                </Tabs>
+               {activeProject ? (
+                  <Tabs defaultValue="chat" className="w-full">
+                    <TabsList className="grid w-full grid-cols-2">
+                      <TabsTrigger value="chat" className="font-headline">Chat</TabsTrigger>
+                      <TabsTrigger value="summary" className="font-headline">Summary</TabsTrigger>
+                    </TabsList>
+                    <TabsContent value="chat">
+                      <ChatView project={activeProject} onCitationClick={setActiveSource} />
+                    </TabsContent>
+                    <TabsContent value="summary">
+                      <SummaryView project={activeProject} />
+                    </TabsContent>
+                  </Tabs>
+               ) : (
+                  <div className="flex flex-col items-center justify-center h-full text-center text-muted-foreground">
+                    <Notebook className="size-12 mb-4" />
+                    <h2 className="text-xl font-semibold font-headline">No Project Selected</h2>
+                    <p className="font-body">Create a new project or select an existing one to get started.</p>
+                  </div>
+               )}
               </div>
             </main>
           </SidebarInset>
@@ -237,6 +302,23 @@ export default function ScholarChat() {
               )}
             </SheetContent>
           </Sheet>
+
+          <AlertDialog open={!!deletionTarget} onOpenChange={() => setDeletionTarget(null)}>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This action cannot be undone. This will permanently delete the {deletionTarget?.type} and all of its data.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction onClick={handleDelete} className="bg-destructive hover:bg-destructive/90">
+                  Delete
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </div>
       </SidebarProvider>
     </TooltipProvider>
@@ -477,3 +559,5 @@ function SummaryView({ project }: { project: Project }) {
     </Card>
   );
 }
+
+    
