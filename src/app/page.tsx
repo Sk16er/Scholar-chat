@@ -32,10 +32,10 @@ import {
   SidebarMenuButton,
   SidebarMenuSub,
   SidebarMenuSubButton,
-  SidebarMenuSubItem,
   SidebarProvider,
   SidebarInset,
   SidebarFooter,
+  SidebarMenuSubItem,
 } from '@/components/ui/sidebar';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
@@ -46,6 +46,8 @@ import { generateDocumentSummary } from '@/ai/flows/generate-document-summary';
 import { answerQuestionsFromDocuments } from '@/ai/flows/answer-questions-from-documents';
 import { Logo } from '@/components/scholar-chat/logo';
 import { UploadDialog } from '@/components/scholar-chat/upload-dialog';
+
+type SourceUpload = { type: 'file', content: File } | { type: 'youtube', content: string } | { type: 'website', content: string };
 
 export default function ScholarChat() {
   const [projects, setProjects] = React.useState<Project[]>(MOCK_PROJECTS);
@@ -71,13 +73,30 @@ export default function ScholarChat() {
     });
   };
 
-  const handleUpload = async (file: File) => {
+  const handleUpload = async (source: SourceUpload) => {
     setIsUploading(true);
+
+    let fileName = '';
+    let fileContent = '';
+
+    if (source.type === 'file') {
+      fileName = source.content.name;
+      // Simulate file processing and summary generation
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      fileContent = `This is the simulated content for ${source.content.name}. It contains key details about AI research and development.`;
+    } else if (source.type === 'youtube') {
+      fileName = `YouTube: ${source.content}`;
+      fileContent = `Simulated transcript for YouTube video: ${source.content}. This transcript covers advanced topics in machine learning.`;
+    } else if (source.type === 'website') {
+      fileName = `Website: ${source.content}`;
+      fileContent = `Simulated content for website: ${source.content}. This page discusses the ethics of artificial intelligence.`;
+    }
+
     const newSource: Source = {
       id: `src_${Date.now()}`,
-      name: file.name,
+      name: fileName,
       status: 'processing',
-      content: 'File content is being extracted...',
+      content: 'Content is being extracted...',
       page: 1,
     };
 
@@ -85,10 +104,6 @@ export default function ScholarChat() {
       ...prev,
       sources: [newSource, ...prev.sources],
     }));
-
-    // Simulate file processing and summary generation
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    const fileContent = `This is the simulated content for ${file.name}. It contains key details about AI research and development.`;
     
     const updatedSource = { ...newSource, status: 'indexed' as const, content: fileContent };
 
@@ -106,7 +121,7 @@ export default function ScholarChat() {
 
       toast({
         title: 'Upload Successful',
-        description: `${file.name} has been indexed and summarized.`,
+        description: `${updatedSource.name} has been indexed and summarized.`,
       });
     } catch (error) {
       console.error('Error generating summary:', error);
