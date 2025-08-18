@@ -61,6 +61,7 @@ import { answerQuestionsFromDocuments } from '@/ai/flows/answer-questions-from-d
 import { generateMindMap } from '@/ai/flows/generate-mind-map';
 import { generateAudioOverview } from '@/ai/flows/generate-audio-overview';
 import { extractTextFromUrl } from '@/ai/flows/extract-text-from-url';
+import { extractTextFromFile } from '@/ai/flows/extract-text-from-file';
 import { Logo } from '@/components/scholar-chat/logo';
 import { UploadDialog } from '@/components/scholar-chat/upload-dialog';
 
@@ -107,14 +108,19 @@ export default function ScholarChat() {
   
     if (source.type === 'file') {
       fileName = source.content.name;
-      fileContentPromise = new Promise((resolve) => {
+      fileContentPromise = new Promise((resolve, reject) => {
         const reader = new FileReader();
-        reader.onload = (e) =>
-          resolve({
-            content: e.target?.result as string,
-            name: source.content.name,
-          });
-        reader.readAsText(source.content);
+        reader.onload = async (e) => {
+          const dataUri = e.target?.result as string;
+          try {
+            const { content } = await extractTextFromFile({ fileDataUri: dataUri });
+            resolve({ content, name: source.content.name });
+          } catch (error) {
+            reject(error);
+          }
+        };
+        reader.onerror = (error) => reject(error);
+        reader.readAsDataURL(source.content);
       });
     } else {
       // YouTube or Website
@@ -144,8 +150,8 @@ export default function ScholarChat() {
     try {
       const { content: fetchedContent, name: fetchedName } = await fileContentPromise;
 
-      if (fetchedContent === 'I am unable to access this URL.') {
-        throw new Error('I am unable to access this URL.');
+      if (fetchedContent === 'I am unable to access this URL.' || fetchedContent === 'I am unable to process this file.') {
+        throw new Error(fetchedContent);
       }
 
       const updatedSource = {
@@ -784,6 +790,3 @@ function MindMapView({ project, onUpdateProject }: { project: Project; onUpdateP
     </Card>
   )
 }
-
-    
-    
