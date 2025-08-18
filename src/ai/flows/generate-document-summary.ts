@@ -19,7 +19,6 @@ export type GenerateDocumentSummaryInput = z.infer<typeof GenerateDocumentSummar
 
 const GenerateDocumentSummaryOutputSchema = z.object({
   summary: z.string().describe('A summary of the document.'),
-  progress: z.string().describe('A message indicating the progress of the summarization process.'),
 });
 export type GenerateDocumentSummaryOutput = z.infer<typeof GenerateDocumentSummaryOutputSchema>;
 
@@ -46,9 +45,6 @@ const generateDocumentSummaryFlow = ai.defineFlow(
   },
   async input => {
     const {output} = await prompt(input);
-    return {
-      ...output!,
-      progress: 'Generated a short, one-sentence summary of the document.'
-    };
+    return output!;
   }
 );
