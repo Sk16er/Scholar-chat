@@ -143,6 +143,11 @@ export default function ScholarChat() {
   
     try {
       const { content: fetchedContent, name: fetchedName } = await fileContentPromise;
+
+      if (fetchedContent === 'I am unable to access this URL.') {
+        throw new Error('I am unable to access this URL.');
+      }
+
       const updatedSource = {
         ...newSource,
         status: 'indexed' as const,
@@ -181,17 +186,18 @@ export default function ScholarChat() {
         description: `${updatedSource.name} has been indexed and summarized.`,
       });
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to process the source.';
       console.error('Error processing source:', error);
       toast({
         variant: 'destructive',
-        title: 'Error',
-        description: 'Failed to process the source.',
+        title: 'Error Processing Source',
+        description: errorMessage,
       });
       setProjects((prevProjects) =>
         prevProjects.map((p) => {
           if (p.id !== activeProject.id) return p;
           const updatedSources = p.sources.map((s) =>
-            s.id === newSource.id ? { ...s, status: 'error' as const } : s
+            s.id === newSource.id ? { ...s, status: 'error' as const, content: errorMessage } : s
           );
           const updatedProject = { ...p, sources: updatedSources };
           setActiveProject(updatedProject);
@@ -779,4 +785,5 @@ function MindMapView({ project, onUpdateProject }: { project: Project; onUpdateP
   )
 }
 
+    
     

@@ -41,13 +41,22 @@ const extractTextFromUrlFlow = ai.defineFlow(
     outputSchema: ExtractTextFromUrlOutputSchema,
   },
   async ({ url }) => {
-    const { output } = await ai.generate({
+    try {
+      const { output } = await ai.generate({
         prompt: `Extract the text content and title from the following URL: ${url}. If it is a video, provide a transcript.`,
         output: {
-            schema: ExtractTextFromUrlOutputSchema,
+          schema: ExtractTextFromUrlOutputSchema,
         },
-    });
-    return output!;
+      });
+      return output!;
+    } catch (e) {
+      console.error(e);
+      // Return a specific string that the frontend can check for.
+      return {
+        name: url,
+        content: 'I am unable to access this URL.',
+      };
+    }
   }
 );
 
