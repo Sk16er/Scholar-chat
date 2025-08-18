@@ -60,6 +60,7 @@ import { generateDocumentSummary } from '@/ai/flows/generate-document-summary';
 import { answerQuestionsFromDocuments } from '@/ai/flows/answer-questions-from-documents';
 import { generateMindMap } from '@/ai/flows/generate-mind-map';
 import { generateAudioOverview } from '@/ai/flows/generate-audio-overview';
+import { extractTextFromUrl } from '@/ai/flows/extract-text-from-url';
 import { Logo } from '@/components/scholar-chat/logo';
 import { UploadDialog } from '@/components/scholar-chat/upload-dialog';
 
@@ -96,26 +97,31 @@ export default function ScholarChat() {
 
   const handleUpload = async (source: SourceUpload) => {
     if (!activeProject) {
-        toast({ variant: 'destructive', title: 'Error', description: 'No active project to add a source to.' });
-        return;
+      toast({ variant: 'destructive', title: 'Error', description: 'No active project to add a source to.' });
+      return;
     }
     setIsUploading(true);
-
+  
     let fileName = '';
-    let fileContent = '';
-
+    let fileContentPromise: Promise<{ content: string; name: string }>;
+  
     if (source.type === 'file') {
       fileName = source.content.name;
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      fileContent = `This is the simulated content for ${source.content.name}. It contains key details about AI research and development.`;
-    } else if (source.type === 'youtube') {
-      fileName = `YouTube: ${source.content}`;
-      fileContent = `Simulated transcript for YouTube video: ${source.content}. This transcript covers advanced topics in machine learning.`;
-    } else if (source.type === 'website') {
-      fileName = `Website: ${source.content}`;
-      fileContent = `Simulated content for website: ${source.content}. This page discusses the ethics of artificial intelligence.`;
+      fileContentPromise = new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = (e) =>
+          resolve({
+            content: e.target?.result as string,
+            name: source.content.name,
+          });
+        reader.readAsText(source.content);
+      });
+    } else {
+      // YouTube or Website
+      fileName = source.content;
+      fileContentPromise = extractTextFromUrl({ url: source.content });
     }
-
+  
     const newSource: Source = {
       id: `src_${Date.now()}`,
       name: fileName,
@@ -123,48 +129,75 @@ export default function ScholarChat() {
       content: 'Content is being extracted...',
       page: 1,
     };
-    
-    const projectWithNewSource = activeProject ? { ...activeProject, sources: [newSource, ...activeProject.sources] } : null;
+  
+    const projectWithNewSource = activeProject
+      ? { ...activeProject, sources: [newSource, ...activeProject.sources] }
+      : null;
+  
     if (projectWithNewSource) {
       setActiveProject(projectWithNewSource);
-      setProjects(prev => prev.map(p => p.id === projectWithNewSource.id ? projectWithNewSource : p));
+      setProjects((prev) =>
+        prev.map((p) => (p.id === projectWithNewSource.id ? projectWithNewSource : p))
+      );
     }
-    
-    const updatedSource = { ...newSource, status: 'indexed' as const, content: fileContent };
-
+  
     try {
+      const { content: fetchedContent, name: fetchedName } = await fileContentPromise;
+      const updatedSource = {
+        ...newSource,
+        status: 'indexed' as const,
+        content: fetchedContent,
+        name: fetchedName || fileName,
+      };
+  
       const summaryResult = await generateDocumentSummary({
         documentTitle: updatedSource.name,
         documentText: updatedSource.content,
       });
-
-      setProjects(prevProjects => prevProjects.map(p => {
-        if (p.id !== activeProject.id) return p;
-        const updatedSources = p.sources.map(s => (s.id === newSource.id ? updatedSource : s));
-        const newSummary = `Summary for ${updatedSource.name}: ${summaryResult.summary}`;
-        const updatedProject = { ...p, sources: updatedSources, summary: newSummary };
-        setActiveProject(updatedProject);
-        return updatedProject;
-      }));
-
+  
+      setProjects((prevProjects) =>
+        prevProjects.map((p) => {
+          if (p.id !== activeProject.id) return p;
+          const updatedSources = p.sources.map((s) =>
+            s.id === newSource.id ? updatedSource : s
+          );
+          const combinedSummaryText = updatedSources
+            .map((s) => s.content)
+            .join('\n\n');
+  
+          const newSummary = `Summary for ${updatedSource.name}: ${summaryResult.summary}`;
+          const updatedProject = {
+            ...p,
+            sources: updatedSources,
+            summary: newSummary,
+          };
+          setActiveProject(updatedProject);
+          return updatedProject;
+        })
+      );
+  
       toast({
         title: 'Upload Successful',
         description: `${updatedSource.name} has been indexed and summarized.`,
       });
     } catch (error) {
-      console.error('Error generating summary:', error);
+      console.error('Error processing source:', error);
       toast({
         variant: 'destructive',
         title: 'Error',
-        description: 'Failed to generate summary for the document.',
+        description: 'Failed to process the source.',
       });
-       setProjects(prevProjects => prevProjects.map(p => {
-        if (p.id !== activeProject.id) return p;
-        const updatedSources = p.sources.map(s => (s.id === newSource.id ? {...updatedSource, status: 'error' as const } : s));
-        const updatedProject = { ...p, sources: updatedSources };
-        setActiveProject(updatedProject);
-        return updatedProject;
-      }));
+      setProjects((prevProjects) =>
+        prevProjects.map((p) => {
+          if (p.id !== activeProject.id) return p;
+          const updatedSources = p.sources.map((s) =>
+            s.id === newSource.id ? { ...s, status: 'error' as const } : s
+          );
+          const updatedProject = { ...p, sources: updatedSources };
+          setActiveProject(updatedProject);
+          return updatedProject;
+        })
+      );
     } finally {
       setIsUploading(false);
     }
@@ -745,3 +778,5 @@ function MindMapView({ project, onUpdateProject }: { project: Project; onUpdateP
     </Card>
   )
 }
+
+    
