@@ -34,6 +34,8 @@ export const MOCK_PROJECTS: Project[] = [
         ],
       },
     ],
+    mindMap: null,
+    audioOverview: null,
   },
   {
     id: 'proj_2',
@@ -46,5 +48,7 @@ export const MOCK_PROJECTS: Project[] = [
         messages: [],
       },
     ],
+    mindMap: null,
+    audioOverview: null,
   },
 ];

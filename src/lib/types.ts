@@ -5,6 +5,8 @@ export interface Project {
   sources: Source[];
   summary: string;
   conversations: Conversation[];
+  mindMap: MindMap | null;
+  audioOverview: string | null;
 }
 
 export interface Source {
@@ -31,4 +33,22 @@ export interface Citation {
   page: number;
   snippet: string;
   source: Source | null;
+}
+
+export interface MindMapNode {
+  id: string;
+  label: string;
+  type: 'source' | 'concept';
+}
+
+export interface MindMapEdge {
+  id: string;
+  from: string;
+  to: string;
+  label?: string;
+}
+
+export interface MindMap {
+    nodes: MindMapNode[];
+    edges: MindMapEdge[];
 }

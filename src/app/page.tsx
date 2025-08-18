@@ -13,10 +13,14 @@ import {
   PlusCircle,
   RefreshCcw,
   Send,
+  Share2,
   Sparkles,
   Trash2,
   User,
+  Volume2,
 } from 'lucide-react';
+import ReactFlow, { MiniMap, Controls, Background, Handle, Position } from 'react-flow-renderer';
+
 
 import { cn } from '@/lib/utils';
 import {
@@ -42,20 +46,20 @@ import {
   SidebarMenuItem,
   SidebarMenuButton,
   SidebarMenuSub,
-  SidebarMenuSubButton,
   SidebarProvider,
   SidebarInset,
   SidebarFooter,
-  SidebarMenuSubItem,
   SidebarMenuAction,
 } from '@/components/ui/sidebar';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useToast } from '@/hooks/use-toast';
-import type { Project, Source, Message, Citation } from '@/lib/types';
+import type { Project, Source, Message, Citation, MindMap } from '@/lib/types';
 import { MOCK_PROJECTS } from '@/lib/data';
 import { generateDocumentSummary } from '@/ai/flows/generate-document-summary';
 import { answerQuestionsFromDocuments } from '@/ai/flows/answer-questions-from-documents';
+import { generateMindMap } from '@/ai/flows/generate-mind-map';
+import { generateAudioOverview } from '@/ai/flows/generate-audio-overview';
 import { Logo } from '@/components/scholar-chat/logo';
 import { UploadDialog } from '@/components/scholar-chat/upload-dialog';
 
@@ -79,6 +83,8 @@ export default function ScholarChat() {
       sources: [],
       summary: 'No summary generated yet. Add sources to get started.',
       conversations: [{ id: 'conv_1', messages: [] }],
+      mindMap: null,
+      audioOverview: null,
     };
     setProjects(prev => [newProject, ...prev]);
     setActiveProject(newProject);
@@ -117,8 +123,12 @@ export default function ScholarChat() {
       content: 'Content is being extracted...',
       page: 1,
     };
-
-    setActiveProject(prev => (prev ? { ...prev, sources: [newSource, ...prev.sources] } : null));
+    
+    const projectWithNewSource = activeProject ? { ...activeProject, sources: [newSource, ...activeProject.sources] } : null;
+    if (projectWithNewSource) {
+      setActiveProject(projectWithNewSource);
+      setProjects(prev => prev.map(p => p.id === projectWithNewSource.id ? projectWithNewSource : p));
+    }
     
     const updatedSource = { ...newSource, status: 'indexed' as const, content: fileContent };
 
@@ -188,6 +198,11 @@ export default function ScholarChat() {
     setDeletionTarget(null);
   };
 
+  const updateProject = (updatedProject: Project) => {
+    setActiveProject(updatedProject);
+    setProjects(prev => prev.map(p => p.id === updatedProject.id ? updatedProject : p));
+  }
+
 
   return (
     <TooltipProvider>
@@ -206,24 +221,22 @@ export default function ScholarChat() {
                   </Button>
                 </div>
                 <SidebarMenu>
-                  <SidebarMenuItem>
-                    <SidebarMenuSub>
-                      {projects.map(project => (
-                        <SidebarMenuSubItem key={project.id}>
-                          <SidebarMenuSubButton
-                            onClick={() => setActiveProject(project)}
-                            isActive={activeProject?.id === project.id}
-                          >
-                            <Notebook className="size-4" />
-                            <span className="truncate font-headline">{project.name}</span>
-                          </SidebarMenuSubButton>
-                           <SidebarMenuAction showOnHover onClick={(e) => { e.stopPropagation(); setDeletionTarget({ type: 'project', id: project.id })}}>
-                            <Trash2 className="size-4" />
-                          </SidebarMenuAction>
-                        </SidebarMenuSubItem>
-                      ))}
-                    </SidebarMenuSub>
-                  </SidebarMenuItem>
+                  <SidebarMenuSub>
+                    {projects.map(project => (
+                      <SidebarMenuItem key={project.id}>
+                        <SidebarMenuButton
+                          onClick={() => setActiveProject(project)}
+                          isActive={activeProject?.id === project.id}
+                        >
+                          <Notebook className="size-4" />
+                          <span className="truncate font-headline">{project.name}</span>
+                        </SidebarMenuButton>
+                         <SidebarMenuAction showOnHover onClick={(e) => { e.stopPropagation(); setDeletionTarget({ type: 'project', id: project.id })}}>
+                          <Trash2 className="size-4" />
+                        </SidebarMenuAction>
+                      </SidebarMenuItem>
+                    ))}
+                  </SidebarMenuSub>
                 </SidebarMenu>
 
                 {activeProject && (
@@ -263,15 +276,19 @@ export default function ScholarChat() {
               <div className="w-full max-w-4xl">
                {activeProject ? (
                   <Tabs defaultValue="chat" className="w-full">
-                    <TabsList className="grid w-full grid-cols-2">
+                    <TabsList className="grid w-full grid-cols-3">
                       <TabsTrigger value="chat" className="font-headline">Chat</TabsTrigger>
                       <TabsTrigger value="summary" className="font-headline">Summary</TabsTrigger>
+                      <TabsTrigger value="mindmap" className="font-headline">Mind Map</TabsTrigger>
                     </TabsList>
                     <TabsContent value="chat">
                       <ChatView project={activeProject} onCitationClick={setActiveSource} />
                     </TabsContent>
                     <TabsContent value="summary">
-                      <SummaryView project={activeProject} />
+                      <SummaryView project={activeProject} onUpdateProject={updateProject} />
+                    </TabsContent>
+                    <TabsContent value="mindmap">
+                      <MindMapView project={activeProject} onUpdateProject={updateProject} />
                     </TabsContent>
                   </Tabs>
                ) : (
@@ -490,14 +507,17 @@ function ChatView({ project, onCitationClick }: { project: Project; onCitationCl
   );
 }
 
-function SummaryView({ project }: { project: Project }) {
+function SummaryView({ project, onUpdateProject }: { project: Project; onUpdateProject: (project: Project) => void; }) {
   const [isGenerating, setIsGenerating] = React.useState(false);
+  const [isGeneratingAudio, setIsGeneratingAudio] = React.useState(false);
   const [summary, setSummary] = React.useState(project.summary);
+  const [audioDataUri, setAudioDataUri] = React.useState<string | null>(project.audioOverview);
   const { toast } = useToast();
 
   React.useEffect(() => {
     setSummary(project.summary);
-  }, [project.summary]);
+    setAudioDataUri(project.audioOverview);
+  }, [project.summary, project.audioOverview]);
 
   const handleRegenerate = async () => {
     if (project.sources.length === 0) {
@@ -517,7 +537,8 @@ function SummaryView({ project }: { project: Project }) {
         documentText: combinedText,
       });
       setSummary(result.summary);
-      // In a real app, this would update the project in the database
+      onUpdateProject({ ...project, summary: result.summary, audioOverview: null });
+      setAudioDataUri(null);
       toast({ title: 'Summary Regenerated' });
     } catch (error) {
        toast({
@@ -530,6 +551,32 @@ function SummaryView({ project }: { project: Project }) {
     }
   };
 
+  const handleGenerateAudio = async () => {
+    if (!summary || summary === 'No summary generated yet. Add sources to get started.') {
+       toast({
+        variant: 'destructive',
+        title: 'Cannot Generate Audio',
+        description: 'Please generate a summary first.',
+      });
+      return;
+    }
+    setIsGeneratingAudio(true);
+    try {
+      const result = await generateAudioOverview(summary);
+      setAudioDataUri(result.audioDataUri);
+      onUpdateProject({ ...project, audioOverview: result.audioDataUri });
+      toast({ title: 'Audio Overview Generated' });
+    } catch (error) {
+       toast({
+        variant: 'destructive',
+        title: 'Error',
+        description: 'Failed to generate audio overview.',
+      });
+    } finally {
+      setIsGeneratingAudio(false);
+    }
+  };
+
   return (
     <Card className="mt-4">
       <CardHeader>
@@ -538,10 +585,16 @@ function SummaryView({ project }: { project: Project }) {
             <Sparkles className="text-accent" />
             Project Summary
           </CardTitle>
-          <Button onClick={handleRegenerate} disabled={isGenerating} size="sm">
-            {isGenerating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCcw className="mr-2 h-4 w-4" />}
-            Regenerate
-          </Button>
+          <div className="flex gap-2">
+            <Button onClick={handleGenerateAudio} disabled={isGeneratingAudio || isGenerating} size="sm" variant="outline">
+              {isGeneratingAudio ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Volume2 className="mr-2 h-4 w-4" />}
+              Audio Overview
+            </Button>
+            <Button onClick={handleRegenerate} disabled={isGenerating} size="sm">
+              {isGenerating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCcw className="mr-2 h-4 w-4" />}
+              Regenerate
+            </Button>
+          </div>
         </div>
         <CardDescription className="font-body">An AI-generated summary of all sources in this project.</CardDescription>
       </CardHeader>
@@ -553,11 +606,142 @@ function SummaryView({ project }: { project: Project }) {
             <div className="h-4 bg-muted rounded w-5/6 animate-pulse"></div>
           </div>
         ) : (
-          <p className="font-body text-sm whitespace-pre-wrap">{summary}</p>
+          <>
+            {audioDataUri && (
+              <div className="mb-4">
+                <audio controls className="w-full">
+                  <source src={audioDataUri} type="audio/wav" />
+                  Your browser does not support the audio element.
+                </audio>
+              </div>
+            )}
+            <p className="font-body text-sm whitespace-pre-wrap">{summary}</p>
+          </>
         )}
       </CardContent>
     </Card>
   );
 }
 
-    
+const nodeTypes = {
+  source: ({ data }: { data: { label: string } }) => (
+    <div className="p-2 text-xs bg-blue-100 border border-blue-400 rounded-md shadow-md w-48">
+      <Handle type="target" position={Position.Top} />
+      <div className="flex items-center gap-2">
+        <FileText className="w-4 h-4 text-blue-600" />
+        <strong className="font-headline">{data.label}</strong>
+      </div>
+      <Handle type="source" position={Position.Bottom} />
+    </div>
+  ),
+  concept: ({ data }: { data: { label: string } }) => (
+    <div className="p-2 text-xs bg-purple-100 border border-purple-400 rounded-md shadow-md w-48">
+      <Handle type="target" position={Position.Top} />
+       <div className="flex items-center gap-2">
+        <Sparkles className="w-4 h-4 text-purple-600" />
+        <strong className="font-body">{data.label}</strong>
+      </div>
+      <Handle type="source" position={Position.Bottom} />
+    </div>
+  ),
+};
+
+function MindMapView({ project, onUpdateProject }: { project: Project; onUpdateProject: (project: Project) => void; }) {
+  const [isGenerating, setIsGenerating] = React.useState(false);
+  const [elements, setElements] = React.useState<any[]>([]);
+  const { toast } = useToast();
+
+  const convertToFlowElements = (mindMap: MindMap | null) => {
+    if (!mindMap) return [];
+    const nodes = mindMap.nodes.map(node => ({
+      id: node.id,
+      type: node.type,
+      data: { label: node.label },
+      position: { x: Math.random() * 400, y: Math.random() * 400 },
+    }));
+    const edges = mindMap.edges.map(edge => ({
+      id: edge.id,
+      source: edge.from,
+      target: edge.to,
+      label: edge.label,
+      animated: true,
+      arrowHeadType: 'arrowclosed',
+    }));
+    return [...nodes, ...edges];
+  };
+  
+  React.useEffect(() => {
+    if (project.mindMap) {
+      setElements(convertToFlowElements(project.mindMap));
+    }
+  }, [project.mindMap]);
+
+  const handleGenerateMindMap = async () => {
+     if (project.sources.length === 0) {
+      toast({
+        variant: 'destructive',
+        title: 'Cannot Generate Mind Map',
+        description: 'Please upload at least one document.',
+      });
+      return;
+    }
+    setIsGenerating(true);
+    try {
+      const result = await generateMindMap({ 
+        sources: project.sources.filter(s => s.status === 'indexed') 
+      });
+      onUpdateProject({ ...project, mindMap: result });
+      setElements(convertToFlowElements(result));
+      toast({ title: 'Mind Map Generated' });
+    } catch (error) {
+      toast({
+        variant: 'destructive',
+        title: 'Error',
+        description: 'Failed to generate mind map.',
+      });
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  return (
+    <Card className="mt-4">
+       <CardHeader>
+        <div className="flex justify-between items-center">
+          <CardTitle className="font-headline flex items-center gap-2">
+            <Share2 className="text-accent" />
+            Project Mind Map
+          </CardTitle>
+          <Button onClick={handleGenerateMindMap} disabled={isGenerating} size="sm">
+            {isGenerating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCcw className="mr-2 h-4 w-4" />}
+            {project.mindMap ? 'Regenerate' : 'Generate'}
+          </Button>
+        </div>
+        <CardDescription className="font-body">An AI-generated mind map of concepts and sources in this project.</CardDescription>
+      </CardHeader>
+      <CardContent className="h-[calc(100vh-250px)] p-0">
+        {isGenerating && elements.length === 0 ? (
+          <div className="flex items-center justify-center h-full">
+            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          </div>
+        ) : elements.length > 0 ? (
+            <ReactFlow
+              elements={elements}
+              nodeTypes={nodeTypes}
+              fitView
+            >
+              <MiniMap />
+              <Controls />
+              <Background />
+            </ReactFlow>
+        ) : (
+          <div className="flex flex-col items-center justify-center h-full text-center text-muted-foreground">
+            <Share2 className="size-12 mb-4" />
+            <h2 className="text-xl font-semibold font-headline">No Mind Map Generated</h2>
+            <p className="font-body">Click "Generate" to create a mind map for this project.</p>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
