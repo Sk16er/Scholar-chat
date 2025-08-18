@@ -4,21 +4,19 @@
  * @fileOverview A flow for generating an audio overview from text.
  *
  * - generateAudioOverview - A function that converts text to speech.
- * - GenerateAudioOverviewInput - The input type for the generateAudioOverview function.
- * - GenerateAudioOverviewOutput - The return type for the generateAudioOverview function.
  */
 
 import { ai } from '@/ai/genkit';
 import { z } from 'genkit';
 import wav from 'wav';
 
-export const GenerateAudioOverviewInputSchema = z.string();
-export type GenerateAudioOverviewInput = z.infer<typeof GenerateAudioOverviewInputSchema>;
+const GenerateAudioOverviewInputSchema = z.string();
+type GenerateAudioOverviewInput = z.infer<typeof GenerateAudioOverviewInputSchema>;
 
-export const GenerateAudioOverviewOutputSchema = z.object({
+const GenerateAudioOverviewOutputSchema = z.object({
   audioDataUri: z.string().describe('The generated audio as a data URI.'),
 });
-export type GenerateAudioOverviewOutput = z.infer<typeof GenerateAudioOverviewOutputSchema>;
+type GenerateAudioOverviewOutput = z.infer<typeof GenerateAudioOverviewOutputSchema>;
 
 export async function generateAudioOverview(
   input: GenerateAudioOverviewInput
